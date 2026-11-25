@@ -1,2 +1,2 @@
-# Lisan-AI-Keyboar
+# Lisan-AI-Keyboard
 لوحة مفاتيح متقدمة لنظام اندرويد
