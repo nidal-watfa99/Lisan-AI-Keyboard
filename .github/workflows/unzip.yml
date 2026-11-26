@@ -1,0 +1,63 @@
+name: Unzip Project
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '*.zip'
+
+permissions:
+  contents: write
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract zip
+        run: |
+          set -e
+          ZIP="Lisan_AI_Keyboard_phase1b.zip"
+          if [ ! -f "$ZIP" ]; then
+            echo "Zip not found: $ZIP"; exit 1
+          fi
+
+          rm -rf /tmp/extract && mkdir -p /tmp/extract
+          unzip -o -q "$ZIP" -d /tmp/extract
+          rm -rf /tmp/extract/__MACOSX
+
+          SRC=/tmp/extract
+          COUNT=$(ls -A /tmp/extract | wc -l)
+          FIRST=$(ls -A /tmp/extract | head -n 1)
+          if [ "$COUNT" -eq 1 ] && [ -d "/tmp/extract/$FIRST" ]; then
+            SRC="/tmp/extract/$FIRST"
+          fi
+
+          shopt -s dotglob
+          for item in "$SRC"/*; do
+            name=$(basename "$item")
+            [ "$name" = ".git" ] && continue
+            if [ "$name" = ".github" ]; then
+              mkdir -p .github
+              cp -rn "$item"/* .github/ || true
+            else
+              cp -r "$item" .
+            fi
+          done
+
+          git rm -q "$ZIP"
+          ls -la
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Extract Lisan_AI_Keyboard_phase1b.zip"
+            git push
+          fi
