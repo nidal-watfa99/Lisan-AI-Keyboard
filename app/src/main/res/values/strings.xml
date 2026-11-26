@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Lisan AI Keyboard</string>
+    <color name="splash_bg">#101826</color>
+    <color name="icon_bg">#121B2D</color>
+    <style name="Theme.Lisan" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/splash_bg</item>
+        <item name="android:colorAccent">#78E7CA</item>
+    </style>
+</resources>

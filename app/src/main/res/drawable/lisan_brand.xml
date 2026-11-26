@@ -1,0 +1,6 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape><corners android:radius="22dp"/><gradient android:startColor="#121B2D" android:endColor="#2E2856" android:angle="45"/></shape>
+    </item>
+    <item android:drawable="@drawable/lisan_mark"/>
+</layer-list>

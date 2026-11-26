@@ -1,0 +1,17 @@
+# تشغيل محركات الصوت والترجمة | Voice and translation setup
+
+## Offline speech
+
+In Voice & microphone, choose **Download model** or **Import model file**. The supported model is [ggml-tiny-q5_1.bin](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin), the multilingual Whisper Tiny Q5_1 weights, not `tiny.en`. The app requires exactly `32152673` bytes and SHA-256 `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7`. Use Import if the download host is unavailable on your network. No recording is sent when retrieving the model. Removing the model frees its local storage.
+
+Choose Arabic or English explicitly or enable language detection. Whisper detects one language per phrase; it does not promise reliable code-switching within a phrase or a particular Arabic dialect. Tap the mic to start, then tap to end the phrase and process it. Another tap starts a fresh turn. A 24-second cap and a simple silence gate bound each recording. The text can be edited in the target app or in the translation draft. Slower phones may need more time, and spare RAM is required. The Android provider option remains separately opt-in. On Android 13+ the settings screen can check a provider's reported local language availability; Android 14+ can report progress when the provider supports the callback.
+
+في «الصوت والميكروفون»، نزّل النموذج أو استورِد الملف المذكور أعلاه. تحقّق الأداة من الحجم والبصمة قبل تثبيته. يحدد Whisper لغة واحدة لكل عبارة عند تفعيل الكشف التلقائي. حدّ التسجيل 24 ثانية للعبارة، ويمكن إنهاؤها والبدء بأخرى. لا يحفظ لسان التسجيلات ولا يرفعها في وضع Whisper.
+
+## Optional self-hosted translation
+
+The standalone translation screen accepts an HTTPS [LibreTranslate API](https://docs.libretranslate.com/api/) compatible endpoint, typically `https://your-domain.example/translate`. In self-hosted setup, install the source and target language models on your server; confirm its supported languages before using it. Lisan will not provision an external server or configure one automatically. The phone uses the platform TLS trust store, disallows redirects for translation POST requests, and does not support credentials in the URL. Keep vendor keys server-side, deploy your own access controls and rate limits, and disable request-body logs. Do not expose an unrestricted service to the public internet.
+
+The app sends a JSON POST with `q` (the exact text previewed), `source` (such as `ar` or `auto`), `target` (such as `en`), and `format: "text"`. The successful response must be HTTP 200 with `application/json` and a non-empty string `translatedText`. For auto detection, the optional `detectedLanguage.language` value is displayed when present. No API key is provided or expected by this client. A deployment that requires a vendor key must terminate authentication on a gateway managed by its owner; this release does not have an account login flow. Each POST requires **Review and send to server**, followed by **Send and translate**. Closing the dialog sends nothing; stopping after confirmation cannot recall a request already delivered. The keyboard itself and any paste shortcut always use ML Kit on-device.
+
+من شاشة الترجمة المستقلة فقط، يمكنك حفظ عنوان خادم HTTPS متوافق. لا يوجد خادم افتراضي ولا مفتاح داخل التطبيق. تُعرض وجهة الإرسال والنص قبل كل طلب؛ إلغاء نافذة التأكيد لا يرسل شيئاً. تبقى ترجمة الكيبورد واللصق التلقائي محلية. احتفظ بأي مفتاح خدمة على الخادم وراجع سياسته قبل إرسال النصوص.
