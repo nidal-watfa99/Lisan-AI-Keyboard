@@ -3,11 +3,7 @@ name: Deploy Web Studio to GitHub Pages
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
-    paths:
-      - 'web-studio/**'
-      - 'Lisan_AI_Keyboard_Full_Source/web-studio/**'
-      - 'extracted_source/**/web-studio/**'
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -24,43 +20,47 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
       - name: Locate web-studio
         id: locate
         run: |
-          if [ -d "web-studio" ]; then
-            echo "dir=web-studio" >> $GITHUB_OUTPUT
-          elif [ -d "Lisan_AI_Keyboard_Full_Source/web-studio" ]; then
-            echo "dir=Lisan_AI_Keyboard_Full_Source/web-studio" >> $GITHUB_OUTPUT
-          elif [ -d "extracted_source/Lisan_AI_Keyboard_Full_Source/web-studio" ]; then
-            echo "dir=extracted_source/Lisan_AI_Keyboard_Full_Source/web-studio" >> $GITHUB_OUTPUT
-          else
-            echo "web-studio not found"
-            find . -type d -name "web-studio" | head -5
+          DIR=$(find . -type d -name "web-studio" -not -path "*/node_modules/*" -not -path "./.git/*" | head -n 1)
+          if [ -z "$DIR" ]; then
+            echo "web-studio not found. Folders in repo:"
+            find . -maxdepth 3 -type d -not -path "./.git*" -not -path "*/node_modules*"
             exit 1
           fi
+          echo "Found: $DIR"
+          echo "dir=$DIR" >> $GITHUB_OUTPUT
 
       - name: Install & Build
         working-directory: ${{ steps.locate.outputs.dir }}
         run: |
-          npm install
-          npm run build || npx vite build
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          if ls vite.config.* >/dev/null 2>&1; then
+            npm run build -- --base=/${{ github.event.repository.name }}/
+          else
+            npm run build
+          fi
+          if [ -d dist ]; then OUT=dist; elif [ -d build ]; then OUT=build; else OUT=out; fi
+          echo "OUT_DIR=${{ steps.locate.outputs.dir }}/$OUT" >> $GITHUB_ENV
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ steps.locate.outputs.dir }}/dist
+          path: ${{ env.OUT_DIR }}
 
       - name: Deploy to GitHub Pages
         id: deployment
