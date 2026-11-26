@@ -68,7 +68,7 @@ class LisanIme : InputMethodService() {
     private var transResult: String = ""
     private var targetOverride: String? = null
     private var sourceOverride: String? = null
-    private var emojiGroup = Emoji.groups.keys.first()
+    private var emojiGroup = ""
     private var variants = emptyList<String>()
     private val ar get() = isArabic(prefs,this)
     private fun t(en: String,a: String) = if (ar) a else en
@@ -77,6 +77,7 @@ class LisanIme : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        scope.launch(Dispatchers.IO) { Emoji.load(this@LisanIme) }
         scope.launch {
             settings.flow.collect {
                 prefs = it
@@ -200,7 +201,7 @@ class LisanIme : InputMethodService() {
             editDraft(action,value)
             return
         }
-        if(panelName=="draft" && action !in listOf("language","marks","symbols","shift","page","hide","imePicker")) return
+        if(panelName=="draft" && action !in listOf("language","symbols","shift","page","hide","imePicker")) return
         if (queryMode && action in listOf("text","space","delete","deleteWord","enter","suggestion")) {
             query = when(action) {
                 "delete","deleteWord" -> if (query.isEmpty()) "" else query.substring(0,query.offsetByCodePoints(query.length,-1))
@@ -214,7 +215,7 @@ class LisanIme : InputMethodService() {
         val ic = currentInputConnection
         if (action !in listOf("delete","space")) undo = null
         if (action in Tools && !safe && action != "language") return
-        if (action !in listOf("mic","marks") && voiceLive) stopVoice(true)
+        if (action != "mic" && voiceLive) stopVoice(true)
         when(action) {
             "text" -> { insert(value); updateSuggestions() }
             "delete","deleteWord" -> if (ic != null) { delete(action == "deleteWord",ic); updateSuggestions() }
@@ -420,6 +421,8 @@ class LisanIme : InputMethodService() {
         }
     }
     private fun emojiPanel() {
+        Emoji.load(this)
+        if (emojiGroup.isEmpty()) emojiGroup = Emoji.groups.keys.firstOrNull() ?: "★"
         val p=frame("emoji",t("Emoji","الإيموجي")) ?: return
         searchLine(p,::emojiPanel)
         if (variants.isNotEmpty()) {
@@ -436,13 +439,13 @@ class LisanIme : InputMethodService() {
             }
         } else drawEmoji(p,if(query.isBlank()) Emoji.groups[emojiGroup].orEmpty() else Emoji.search(query))
     }
-    private fun drawEmoji(p: LinearLayout, items: List<String>) {
-        items.filter { android.graphics.Paint().hasGlyph(it) }.chunked(7).forEach { row ->
+    private fun drawEmoji(p: LinearLayout, items: List<String>, direct: Boolean = false) {
+        items.filter { Emoji.drawable(it) }.chunked(8).forEach { row ->
             val grid=LinearLayout(this)
             row.forEach { e ->
                 grid.addView(TextView(this).apply {
-                    text=e; textSize=23f; gravity=Gravity.CENTER; contentDescription=e
-                    setOnClickListener { insertEmoji(e) }
+                    text=e; textSize=24f; gravity=Gravity.CENTER; contentDescription=e
+                    setOnClickListener { if (!direct && Emoji.hasVariants(e)) emojiActions(e) else insertEmoji(e) }
                     setOnLongClickListener { if (!safe) return@setOnLongClickListener false
                         emojiActions(e); true }
                 },LinearLayout.LayoutParams(0,dp(40),1f))
@@ -452,7 +455,7 @@ class LisanIme : InputMethodService() {
     }
     private fun emojiActions(e: String) {
         val p = frame("emoji",e) ?: return
-        line(p,Emoji.variants(e).map { item -> item to { insertEmoji(item) } })
+        drawEmoji(p,Emoji.variants(e),true)
         line(p,listOf(t("Favorite","مفضلة") to { save("emojiFav",JSONObject().put("text",e)) { emojiPanel() } },
             t("Copy","نسخ") to { clip.setPrimaryClip(ClipData.newPlainText("Lisan emoji",e)); emojiPanel() },
             t("Back","رجوع") to { emojiPanel() }))
@@ -461,7 +464,7 @@ class LisanIme : InputMethodService() {
         if (!safe) return
         insert(e)
         if (prefs.emojiHistory) save("emojiRecent",JSONObject().put("text",e))
-        closePanel()
+        // Keep the emoji panel open so several emoji can be entered in a row.
     }
     private fun translatePanel(message: String = "", missing: Boolean = false, busy: Boolean = false) {
         val p=frame("translate",t("Translate on device","ترجمة على الجهاز")) ?: return
@@ -479,7 +482,7 @@ class LisanIme : InputMethodService() {
             transResult=""; translatePanel(if(trans.isBlank()) t("No field text.","لا يوجد نص في الحقل.") else "")
         },t("Use copied text","استخدام النص المنسوخ") to {
             stopVoice(true);trans=clipboardText(); transResult=""
-            if (trans.isNotBlank() && prefs.autoPaste) translate(false)
+            if (trans.isNotBlank()) translate(true)
             else translatePanel(if(trans.isBlank()) t("No accessible copied text.","لا يوجد نص منسوخ متاح.") else "")
         }))
         if (trans.isNotBlank()) heading(p,trans)
@@ -493,7 +496,13 @@ class LisanIme : InputMethodService() {
             line(p,listOf(t("Insert result","إدراج الناتج") to { insert(transResult); closePanel() },
                 t("Copy","نسخ") to { clip.setPrimaryClip(ClipData.newPlainText("Lisan translation",transResult)) }))
         }
-        if (!busy) line(p,listOf(t("Translate with Google","الترجمة باستخدام Google") to { if(trans.isNotBlank()) translate(false) },
+        if (!busy) line(p,listOf(t("Translate","ترجمة") to {
+                if (trans.isBlank()) {
+                    val selection=selected()
+                    trans=(selection.ifBlank { before(2500)+runCatching { currentInputConnection?.getTextAfterCursor(2500,0)?.toString().orEmpty() }.getOrDefault("") }).take(5000)
+                }
+                if(trans.isNotBlank()) translate(true) else translatePanel(t("Type or select text first, or use copied text.","اكتب أو حدّد نصاً أولاً، أو استخدم النص المنسوخ."))
+            },
             t("Manual screen","واجهة الترجمة") to { openApp("translate") }))
         if(busy)line(p,listOf(t("Stop waiting","إيقاف الانتظار") to { panelJob?.cancel();panelJob=null;translatePanel() }))
         if (missing) line(p,listOf(t("Download and translate with Google","تنزيل وترجمة باستخدام Google") to { translate(true) }))
@@ -532,10 +541,10 @@ class LisanIme : InputMethodService() {
         val token=field
         val text=trans
         val target=(targetOverride ?: prefs.target).let { if(it=="device") resolvedTarget(prefs.copy(target="device"),resources.configuration.locales[0]) else it }
-        translatePanel(t("Working…","جارٍ المعالجة…"),busy=true)
+        translatePanel(if(download) t("Translating… the first time downloads the language model (~30 MB).","جارٍ الترجمة… في المرة الأولى يُنزَّل نموذج اللغة (حوالي 30 ميغابايت).") else t("Working…","جارٍ المعالجة…"),busy=true)
         panelJob=scope.launch {
             try {
-                val result=LocalTranslator.translate(text,sourceOverride ?: prefs.source,target,download,prefs.wifi)
+                val result=LocalTranslator.translate(text,sourceOverride ?: prefs.source,target,download,false)
                 if (token != field || !safe || panelName!="translate") return@launch
                 transResult=result.text
                 if (prefs.saveHistory) save("history",JSONObject().put("text",text).put("out",result.text).put("from",result.source).put("to",result.target))

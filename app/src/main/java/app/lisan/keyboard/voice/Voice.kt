@@ -14,7 +14,7 @@ import android.speech.ModelDownloadListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 
-data class VoiceConfig(val tag: String, val localOnly: Boolean, val detect: Boolean)
+data class VoiceConfig(val tag: String, val localOnly: Boolean, val detect: Boolean, val preferOffline: Boolean = false)
 interface VoiceEngine {
     fun available(local: Boolean): Boolean
     fun start(config: VoiceConfig, listener: (String, String) -> Unit)
@@ -31,7 +31,8 @@ class AndroidVoice(private val context: Context) : VoiceEngine {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, config.tag)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        if (config.localOnly) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        if (config.localOnly || config.preferOffline) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         if (Build.VERSION.SDK_INT >= 33) putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, RecognizerIntent.FORMATTING_OPTIMIZE_QUALITY)
         if (Build.VERSION.SDK_INT >= 34 && config.detect) {
             putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
@@ -133,10 +134,13 @@ fun voiceMessage(state: String, value: String, ar: Boolean): String {
         "processing" -> "Processing speech…" to "جارٍ معالجة الكلام…"
         "detected" -> "● Listening · $value" to "● أستمع الآن · $value"
         "permission" -> "Allow microphone access, then tap again" to "اسمح بالميكروفون ثم اضغط مرة أخرى"
-        "unavailable" -> "Speech unavailable. Check Voice settings." to "التعرف غير متاح. راجع إعدادات الصوت."
+        "unavailable" -> "No speech service found. Install or update the Google app, or download the Whisper model in Voice settings." to "لا توجد خدمة تعرّف صوتي. ثبّت تطبيق Google أو حدّثه، أو نزّل نموذج Whisper من إعدادات الصوت."
         "model_missing" -> "Install the offline model in Voice settings." to "ثبّت النموذج المحلي من إعدادات الصوت."
+        "fallback" -> "Using Google speech recognition…" to "جارٍ استخدام التعرف الصوتي من Google…"
         "error" -> when (value.toIntOrNull()) {
-            1,2 -> "Speech connection failed." to "فشل الاتصال بخدمة الصوت."
+            1,2 -> "Speech connection failed. Check the internet or download the offline Arabic pack in Google settings." to "فشل الاتصال بخدمة الصوت. تحقق من الإنترنت أو نزّل حزمة العربية دون اتصال من إعدادات Google."
+            5 -> "Speech service busy. Tap to retry." to "خدمة الصوت مشغولة. اضغط للمحاولة."
+            8 -> "Speech service busy. Tap again in a moment." to "خدمة الصوت مشغولة. اضغط بعد لحظة."
             3,9 -> "Microphone unavailable or permission denied." to "الميكروفون غير متاح أو الإذن مرفوض."
             6,7 -> "No speech recognized. Tap to retry." to "لم يُتعرف على كلام. اضغط للمحاولة."
             12,13 -> "Language unavailable in this provider." to "اللغة غير متوفرة لدى هذا المحرك."

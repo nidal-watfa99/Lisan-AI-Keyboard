@@ -62,7 +62,7 @@ import kotlin.math.roundToInt
         Sub(w("Rows & order","الصفوف والترتيب"))
         Toggle(w("Number row","صف الأرقام"),p.numbers){n->edit{it.copy(numbers=n)}}
         Toggle(w("Use ١٢٣ in Arabic","استخدم ١٢٣ في العربية"),p.eastern){n->edit{it.copy(eastern=n)}}
-        Toggle(w("Arabic diacritics row","صف التشكيل العربي"),p.marks){n->edit{it.copy(marks=n)}}
+        Toggle(w("Enlarged letter preview when pressing a key","تكبير الحرف فوق المفتاح عند الضغط"),p.keyPreview){n->edit{it.copy(keyPreview=n)}}
         p.rowOrder.forEachIndexed { i,row ->
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(w("Letter row ${row+1}","صف الحروف ${row+1}"),Modifier.weight(1f))
@@ -151,24 +151,66 @@ import kotlin.math.roundToInt
 
 @Composable internal fun Fonts(p:Prefs,w:W,edit:EditPrefs) {
     val ctx=LocalContext.current
+    val scope=rememberCoroutineScope()
+    var fonts by remember { mutableStateOf<List<app.lisan.keyboard.keyboard.FontEntry>?>(null) }
+    var reload by remember { mutableIntStateOf(0) }
+    var q by remember { mutableStateOf("") }
+    var arabicOnly by remember { mutableStateOf(true) }
+    var message by remember { mutableStateOf("") }
+    LaunchedEffect(reload) {
+        fonts=withContext(Dispatchers.IO) { runCatching { app.lisan.keyboard.keyboard.FontCatalog.all(ctx) }.getOrDefault(emptyList()) }
+    }
+    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri!=null) scope.launch {
+            val id=withContext(Dispatchers.IO){ runCatching { app.lisan.keyboard.keyboard.FontCatalog.import(ctx,uri) }.getOrNull() }
+            if(id==null) message=w("This file is not a usable font (.ttf or .otf).","هذا الملف ليس خطاً صالحاً (.ttf أو .otf).")
+            else { message=w("Font added and applied.","تمت إضافة الخط وتطبيقه."); edit{it.copy(font=id)}; reload++ }
+        }
+    }
     Page(w("Typography","الخطوط"),w("Fonts & sizes","الخطوط والأحجام"),
         w("Fonts change Lisan’s keys, not the font used by the app that receives your text.","تغيّر الخطوط مظهر مفاتيح لسان، وليس خط التطبيق الذي يستقبل النص."))
     PreviewBoard(p,w)
     Tile {
         Knob(w("Letter size","حجم الحروف"),p.fontSize,12,28){n->edit{it.copy(fontSize=n)}}
-        Prefs.fontNames.forEach { name ->
-            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                RadioButton(selected=p.font==name,onClick={edit{it.copy(font=name)}})
-                Column(Modifier.weight(1f)) {
-                    Sub(when(name) { "system"->w("System default","خط النظام"); "serif"->"Serif"; "mono"->"Monospace"; else->name.replaceFirstChar { it.uppercase() } })
-                    androidx.compose.ui.viewinterop.AndroidView(
-                        factory={android.widget.TextView(it).apply {setTextColor(0xffdcdef7.toInt()); text="لِسَانٌ  ·  Typography"; textSize=22f }},
-                        update={it.typeface=app.lisan.keyboard.keyboard.BoardStyle.type(ctx,name)}
-                    )
+        Button(onClick={picker.launch(arrayOf("font/ttf","font/otf","font/*","application/x-font-ttf","application/x-font-otf","application/octet-stream","*/*"))}){
+            Text(w("Add a font from this phone (.ttf / .otf)","إضافة خط من الجوال (.ttf / .otf)"))
+        }
+        Help(w("Download any free font (for example from Google Fonts) to your phone, then add it here.","نزّل أي خط مجاني (مثلاً من Google Fonts) إلى جوالك ثم أضفه من هنا."))
+        if(message.isNotBlank()) Help(message)
+        Field(q,{q=it.take(40)},w("Search fonts","بحث عن خط"))
+        Toggle(w("Show Arabic fonts only","إظهار الخطوط العربية فقط"),arabicOnly){arabicOnly=it}
+    }
+    val list=fonts
+    if(list==null) Tile { Help(w("Loading fonts…","جارٍ تحميل الخطوط…")) }
+    else {
+        val shown=list.filter { (!arabicOnly || it.arabic) && (q.isBlank() || it.label.contains(q,true)) }
+        listOf("builtin" to w("Android styles","أنماط أندرويد"),"bundled" to w("Included with Lisan","مضمّنة مع لسان"),
+            "user" to w("Added by you","أضفتها أنت"),"device" to w("Installed on this phone","مثبتة على هذا الجوال")).forEach { (source,title) ->
+            val items=shown.filter { it.source==source }
+            if(items.isNotEmpty()) Tile {
+                Sub("$title · ${items.size}")
+                items.forEach { f ->
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                        RadioButton(selected=p.font==f.id,onClick={edit{it.copy(font=f.id)}})
+                        Column(Modifier.weight(1f)) {
+                            Help(f.label)
+                            androidx.compose.ui.viewinterop.AndroidView(
+                                factory={android.widget.TextView(it).apply {setTextColor(0xffdcdef7.toInt()); textSize=21f; maxLines=1 }},
+                                update={ tv -> tv.text=if(f.arabic)"أبجد هوز · لسان 123" else "Lisan Keyboard 123"
+                                    tv.typeface=app.lisan.keyboard.keyboard.FontCatalog.typeface(ctx,f.id) }
+                            )
+                        }
+                        if(f.source=="user") TextButton(onClick={
+                            app.lisan.keyboard.keyboard.FontCatalog.remove(ctx,f.id)
+                            if(p.font==f.id) edit{it.copy(font="system")}
+                            reload++
+                        }){Text(w("Remove","حذف"))}
+                    }
                 }
             }
         }
-        Help(w("Cairo, Tajawal and Amiri are bundled. Their license files are included with the source.","خطوط القاهرة وتجوال وأميري مضمّنة. تراخيصها موجودة مع المصدر."))
+        Tile { Help(w("Cairo, Tajawal and Amiri are bundled with their licenses. Any .ttf file added to app/src/main/assets/fonts in the source also appears here automatically.",
+            "خطوط القاهرة وتجوال وأميري مضمّنة مع تراخيصها. أي ملف .ttf يُضاف إلى المجلد app/src/main/assets/fonts في المستودع يظهر هنا تلقائياً.")) }
     }
 }
 
@@ -224,7 +266,8 @@ import kotlin.math.roundToInt
             if(mode=="system" && p.voiceMode!="system") confirm=true else edit{it.copy(voiceMode=mode)}
         }
         Help(if(engine.android.available(true))w("Automatic offline uses Whisper if installed, otherwise Android's on-device recognizer.","يستخدم الوضع المحلي التلقائي Whisper إذا ثُبّت، وإلا يستخدم محرك أندرويد المحلي.")
-             else w("Android reports no local engine. Install the Whisper model to dictate without a network connection.","لم يُرصد محرك أندرويد محلي. ثبّت نموذج Whisper للإملاء دون اتصال."))
+             else w("No on-device engine on this phone. Until you install the Whisper model below, the microphone uses Google speech recognition (it works offline if you download the Arabic offline pack in Google settings).",
+                 "لا يوجد محرك صوت محلي على هذا الجوال. إلى أن تثبّت نموذج Whisper بالأسفل، يستخدم الميكروفون التعرف الصوتي من Google (ويعمل دون إنترنت إذا نزّلت حزمة العربية من إعدادات Google)."))
         val tags=listOf("ar","ar-SY","ar-SA","en-US","en-GB","fr-FR","de-DE","nl-NL","tr-TR").let { if(p.voiceLang !in it && p.voiceLang!="keyboard")it+p.voiceLang else it }
         Choose(w("Recognition language","لغة التعرف"),p.voiceLang,listOf("keyboard" to w("Current keyboard","الكيبورد الحالي"))+tags.map{it to displayLanguage(it,ar)}) { tag -> edit {it.copy(voiceLang=tag)} }
         Field(custom,{custom=it.take(35)},w("Custom language tag (e.g. ar-EG)","رمز لغة مخصص (مثل ar-EG)"))

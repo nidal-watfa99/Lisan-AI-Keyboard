@@ -32,22 +32,14 @@ object BoardStyle {
         "glass" -> Palette(c("424C67"),c("2A3449"),c("515D79"),c("F3F6FF"),c("DEE8FF"),c("626F8B"),c("AED5FF"),c("101E30"))
         else -> Palette(c("111B2B"),c("1D2840"),c("273650"),c("F4F7FF"),c("ACBBDC"),c("334462"),c("79E9CB"),c("112D2D"))
     }
-    private val fonts = mutableMapOf<String,Typeface>()
-    fun type(ctx: Context, font: String): Typeface = fonts.getOrPut(font) {
-        when (font) {
-            "cairo","tajawal","amiri" -> runCatching { Typeface.createFromAsset(ctx.assets,"fonts/$font.ttf") }.getOrDefault(Typeface.DEFAULT)
-            "serif" -> Typeface.SERIF
-            "mono" -> Typeface.MONOSPACE
-            else -> Typeface.create("sans-serif-medium",Typeface.NORMAL)
-        }
-    }
+    fun type(ctx: Context, font: String): Typeface = FontCatalog.typeface(ctx,font)
 }
 
 fun toolName(id: String, ar: Boolean): String {
     val pair = when(id) {
         "translate" -> "Translate" to "ترجمة"; "mic" -> "Microphone" to "الميكروفون"
         "clipboard" -> "Clipboard" to "الحافظة"; "emoji" -> "Emoji" to "الإيموجي"
-        "cursor" -> "Editing tools" to "أدوات التحرير"; "marks" -> "Diacritics" to "التشكيل"
+        "cursor" -> "Editing tools" to "أدوات التحرير"
         "language" -> "Change language" to "تغيير اللغة"; "settings" -> "Settings" to "الإعدادات"
         else -> id to id
     }
@@ -70,6 +62,9 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
     private var status = ""
     private var enterLabel: String? = null
     private var popup: PopupWindow? = null
+    private var preview: PopupWindow? = null
+    private var previewText: TextView? = null
+    private var previewOwner: View? = null
     private var palette = BoardStyle.palette("dark")
     private val ar get() = isArabic(p,context)
     private val compact get() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -140,19 +135,67 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
             showAsDropDown(anchor,0,-anchor.height - dp(50))
         }
     }
-    override fun onDetachedFromWindow() { popup?.dismiss(); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { popup?.dismiss(); hidePreview(); super.onDetachedFromWindow() }
+    /** Enlarged bubble above the pressed key, like a phone keyboard's key preview. */
+    private fun showPreview(anchor: View, label: String) {
+        if (!p.keyPreview || anchor.width == 0 || !anchor.isAttachedToWindow) return
+        previewOwner = anchor
+        val w = (anchor.width * 1.5f).toInt().coerceAtLeast(dp(46))
+        val h = (anchor.height * 1.7f).toInt().coerceAtLeast(dp(64))
+        val tv = previewText ?: TextView(context).apply {
+            gravity = Gravity.CENTER; includeFontPadding = false; maxLines = 1
+        }.also { previewText = it }
+        tv.text = label
+        tv.textSize = (p.fontSize + 12).toFloat()
+        tv.typeface = BoardStyle.type(context,p.font)
+        tv.setTextColor(color("text",palette.fg))
+        tv.background = shape(palette.special.let { if (p.theme == "custom") color("special",it) else it }, (p.radius + 4).coerceAtMost(24)).apply {
+            setStroke(dp(1), palette.accent)
+        }
+        tv.elevation = dp(6).toFloat()
+        val pw = preview ?: PopupWindow(tv, w, h, false).apply {
+            isTouchable = false; isFocusable = false; isClippingEnabled = false
+            setBackgroundDrawable(null); animationStyle = 0
+        }.also { preview = it }
+        val x = (anchor.width - w) / 2
+        val y = -anchor.height - h + dp(4)
+        if (pw.isShowing) pw.update(anchor, x, y, w, h)
+        else runCatching { pw.width = w; pw.height = h; pw.showAsDropDown(anchor, x, y) }
+    }
+    private fun hidePreview(owner: View? = null) {
+        if (owner != null && owner !== previewOwner) return
+        previewOwner = null
+        runCatching { preview?.dismiss() }
+    }
+    private fun pressEffect(v: View, label: String) {
+        v.setOnTouchListener { view, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    view.animate().scaleX(1.12f).scaleY(1.12f).setDuration(60).start()
+                    showPreview(view,label)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
+                    hidePreview(view)
+                }
+            }
+            false
+        }
+    }
     private fun printable(row: LinearLayout, label: String, mode: String = "letter") {
         val rendered = if (shifted && !page && mode == "letter") KeyboardCore.upper(label,lang) else label
         fun send(text: String) {
             event("text",text)
             if (shifted && !locked && mode == "letter") { shifted = false; render() }
         }
-        val display = if (mode == "mark" && label != "ـ") "◌$rendered" else rendered
+        val display = rendered
         val key = key(display,{send(rendered)}, foreground = color(
             if (mode == "number") "numbers" else if (mode == "letter") "text" else "symbols",palette.fg),
             size = if (mode == "letter") p.fontSize else p.symbolSize)
+        pressEffect(key,display)
         KeyboardCore.alternatives[label]?.let { subs ->
             key.setOnLongClickListener {
+                hidePreview()
                 popup(key,subs.map { raw ->
                     val s = if (shifted && mode == "letter") KeyboardCore.upper(raw,lang) else raw
                     s to { send(s) }
@@ -178,12 +221,10 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
         val layout = KeyboardCore.layouts.firstOrNull { it.tag == lang } ?: KeyboardCore.layouts.first()
         if (p.toolbar && !privateField && !numericField) {
             val labels = mapOf("translate" to "A↔ع", "mic" to "◉", "clipboard" to "▤", "emoji" to "☺",
-                "cursor" to "↔", "marks" to "◌َ", "language" to "◎", "settings" to "⚙")
-            val tools = p.tools.filter { p.clipboard || it != "clipboard" }.filter { layout.arabic || it != "marks" }
+                "cursor" to "↔", "language" to "◎", "settings" to "⚙")
+            val tools = p.tools.filter { p.clipboard || it != "clipboard" }.filter { it in labels }
             if (tools.isNotEmpty()) addRow(row().apply {
-                tools.forEach { id -> put(key(labels.getValue(id),{
-                    when (id) { "marks" -> { marksOpen = !marksOpen; render() }; else -> event(id,"") }
-                },toolName(id,ar), fill=when(id) { "translate","mic" -> palette.accent; else -> color("special",palette.special) },
+                tools.forEach { id -> put(key(labels.getValue(id),{ event(id,"") },toolName(id,ar), fill=when(id) { "translate","mic" -> palette.accent; else -> color("special",palette.special) },
                     foreground=when(id) { "translate","mic" -> color(id,palette.onAccent); else -> color("text",palette.fg) }, size=p.symbolSize).apply {
                         if(id=="mic") {
                             val mic = context.getDrawable(app.lisan.keyboard.R.drawable.ic_microphone)?.mutate()
@@ -206,9 +247,6 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
             val digits = if (p.eastern && layout.arabic) "١٢٣٤٥٦٧٨٩٠" else "1234567890"
             addRow(row().apply { digits.forEach { printable(this,it.toString(),"number") } }, if (compact) 26 else 33)
         }
-        if (!page && !numericField && layout.arabic && (p.marks || marksOpen)) addRow(row().apply {
-            KeyboardCore.marks.forEach { printable(this,it,"mark") }
-        },if (compact) 26 else 34)
         if (numericField) {
             listOf("1 2 3","4 5 6","7 8 9","- 0 .").forEach { group ->
                 addRow(row().apply { group.split(' ').forEach { printable(this,it,"number") } },rowHeight)

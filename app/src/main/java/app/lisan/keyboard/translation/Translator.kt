@@ -36,7 +36,13 @@ object LocalTranslator : TranslationEngine {
         manager.download(model(tag), conditions(wifi)).await()
     }
     override suspend fun remove(tag: String) { require(tag in languages && tag != "en"); manager.deleteDownloadedModel(model(tag)).await() }
-    private fun language(tag: String) = TranslateLanguage.fromLanguageTag(tag) ?: throw UnsupportedLanguage(tag)
+    private fun language(tag: String): String {
+        val clean = tag.trim()
+        return TranslateLanguage.fromLanguageTag(clean)
+            ?: TranslateLanguage.fromLanguageTag(Locale.forLanguageTag(clean).language)
+            ?: TranslateLanguage.fromLanguageTag(clean.substringBefore('-').substringBefore('_').lowercase(Locale.ROOT))
+            ?: throw UnsupportedLanguage(tag)
+    }
     override suspend fun translate(text: String, source: String, target: String, download: Boolean, wifi: Boolean): TranslationResult {
         require(text.isNotBlank() && text.length <= 5000)
         val detected = if (source == "auto") {
@@ -44,8 +50,12 @@ object LocalTranslator : TranslationEngine {
             try { id.identifyLanguage(text).await().also { if (it == "und") throw UnrecognizedLanguage() } }
             finally { id.close() }
         } else source
-        val from = language(detected); val to = language(target)
-        if (from == to) return TranslationResult(text, from, to)
+        val from = language(detected)
+        val wanted = language(target)
+        // If the text is already in the target language (e.g. Arabic text with an Arabic phone),
+        // translate to the most useful other language instead of returning the same text.
+        val to = if (wanted != from) wanted
+            else if (from == TranslateLanguage.ENGLISH) TranslateLanguage.ARABIC else TranslateLanguage.ENGLISH
         val client = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(from).setTargetLanguage(to).build())
         try {
             val absent = (setOf(from,to) - "en") - models()
@@ -57,7 +67,7 @@ object LocalTranslator : TranslationEngine {
 }
 
 fun resolvedTarget(prefs: Prefs, locale: Locale): String =
-    if (prefs.target != "device") prefs.target else locale.toLanguageTag()
+    if (prefs.target != "device") prefs.target else locale.language.ifBlank { "en" }
 
 fun displayLanguage(tag: String, ar: Boolean): String = when (tag) {
     "device" -> if (ar) "لغة الجهاز" else "Device language"
@@ -69,5 +79,9 @@ fun describeTranslationError(e: Throwable, ar: Boolean): String = when(e) {
     is MissingModels -> if (ar) "النماذج غير مثبتة: ${e.languages.joinToString()}" else "Models not installed: ${e.languages.joinToString()}"
     is UnrecognizedLanguage -> if (ar) "تعذر اكتشاف اللغة؛ اختر لغة المصدر أو اكتب نصاً أطول." else "Could not identify the language. Choose a source language or enter more text."
     is UnsupportedLanguage -> if (ar) "اللغة غير متاحة محلياً: ${e.tag}. اختر لغة مدعومة." else "Language not available locally: ${e.tag}. Select a supported language."
-    else -> if (ar) "تعذرت العملية. تحقق من الاتصال ومساحة التخزين وإعداد Wi‑Fi." else "Operation failed. Check your connection, available storage, and Wi-Fi setting."
+    else -> {
+        val detail = (e.message ?: e.javaClass.simpleName).take(120)
+        if (ar) "تعذرت الترجمة. تأكد من الاتصال بالإنترنت لتنزيل نموذج اللغة أول مرة، ومن وجود مساحة كافية. ($detail)"
+        else "Translation failed. Make sure you are online for the first model download and have free storage. ($detail)"
+    }
 }

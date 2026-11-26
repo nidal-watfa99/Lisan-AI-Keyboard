@@ -14,14 +14,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private val Context.lisanData by preferencesDataStore("lisan_settings")
-val Tools = listOf("translate", "mic", "clipboard", "emoji", "cursor", "marks", "language", "settings")
+val Tools = listOf("translate", "mic", "clipboard", "emoji", "cursor", "language", "settings")
 val CustomColors = listOf("bg", "text", "numbers", "symbols", "special", "mic", "translate")
 
 data class Prefs(
     val ui: String = "device", val languages: List<String> = listOf("ar", "en"), val defaultLang: String = "ar",
     val theme: String = "dark", val font: String = "system", val fontSize: Int = 19, val symbolSize: Int = 15,
     val height: Int = 48, val width: Int = 100, val gap: Int = 2, val radius: Int = 12, val border: Int = 0,
-    val alpha: Int = 100, val toolbarSize: Int = 38, val shadow: Boolean = false,
+    val alpha: Int = 100, val toolbarSize: Int = 38, val shadow: Boolean = false, val keyPreview: Boolean = true,
     val savedThemes: Map<String,String> = emptyMap(),
     val rowHeights: List<Int> = listOf(0,0,0), val rowOrder: List<Int> = listOf(0,1,2),
     val colors: Map<String,String> = emptyMap(),
@@ -30,7 +30,7 @@ data class Prefs(
     val autoCaps: Boolean = true, val correction: Boolean = false, val arabicCorrection:Boolean=false, val tools: List<String> = Tools,
     val voiceLang: String = "keyboard", val voiceMode: String = "local",
     val voiceAuto: Boolean = false, val voiceRepeat: Boolean = false,
-    val source: String = "auto", val target: String = "device", val wifi: Boolean = true,
+    val source: String = "auto", val target: String = "device", val wifi: Boolean = false,
     val autoPaste: Boolean = false, val saveHistory: Boolean = false, val clipboard: Boolean = true,
     val emojiHistory: Boolean = false, val storeUrl: String = "", val cloudEndpoint: String = ""
 ) {
@@ -38,7 +38,7 @@ data class Prefs(
         put("ui",ui); put("languages",JSONArray(languages)); put("defaultLang",defaultLang); put("theme",theme)
         put("font",font); put("fontSize",fontSize); put("symbolSize",symbolSize); put("height",height)
         put("width",width); put("gap",gap); put("radius",radius); put("border",border); put("alpha",alpha)
-        put("toolbarSize",toolbarSize); put("shadow",shadow); put("rowHeights",JSONArray(rowHeights))
+        put("toolbarSize",toolbarSize); put("shadow",shadow); put("keyPreview",keyPreview); put("rowHeights",JSONArray(rowHeights))
         put("rowOrder",JSONArray(rowOrder)); put("colors",JSONObject(colors)); put("savedThemes",JSONObject(savedThemes))
         put("numbers",numbers); put("suggestions",suggestions); put("toolbar",toolbar); put("marks",marks)
         put("eastern",eastern); put("haptics",haptics); put("autoCaps",autoCaps); put("correction",correction);put("arabicCorrection",arabicCorrection)
@@ -82,11 +82,11 @@ data class Prefs(
                 ui=s("ui","device").takeIf { it in listOf("device","ar","en") } ?: "device",
                 languages=languages, defaultLang=s("defaultLang","ar").takeIf { it in languages } ?: languages.first(),
                 theme=s("theme","dark").takeIf { it in themeNames } ?: "dark",
-                font=s("font","system").takeIf { it in fontNames } ?: "system",
+                font=s("font","system").takeIf { app.lisan.keyboard.keyboard.FontCatalog.isValidId(it) } ?: "system",
                 fontSize=i("fontSize",19,12..28), symbolSize=i("symbolSize",15,10..23), height=i("height",48,38..60),
                 width=i("width",100,80..100), gap=i("gap",2,0..4), radius=i("radius",12,0..24),
                 border=i("border",0,0..3), alpha=i("alpha",100,50..100), toolbarSize=i("toolbarSize",38,32..50),
-                shadow=b("shadow"), rowHeights=heights, rowOrder=order, colors=colors, savedThemes=savedThemes,
+                shadow=b("shadow"), keyPreview=b("keyPreview",true), rowHeights=heights, rowOrder=order, colors=colors, savedThemes=savedThemes,
                 numbers=b("numbers",true), suggestions=b("suggestions",true), toolbar=b("toolbar",true),
                 marks=b("marks"), eastern=b("eastern"), haptics=b("haptics"), autoCaps=b("autoCaps",true),
                 correction=b("correction"), arabicCorrection=b("arabicCorrection"), tools=list("tools",Tools).filter { it in Tools }.distinct(),
@@ -94,7 +94,7 @@ data class Prefs(
                 voiceMode=s("voiceMode","local").takeIf { it in listOf("local","bundled","system") } ?: "local",
                 voiceAuto=b("voiceAuto"), voiceRepeat=b("voiceRepeat"),
                 source=s("source","auto").take(12), target=s("target","device").take(12),
-                wifi=b("wifi",true), autoPaste=b("autoPaste"), saveHistory=b("saveHistory"),
+                wifi=b("wifi",false), autoPaste=b("autoPaste"), saveHistory=b("saveHistory"),
                 clipboard=b("clipboard",true), emojiHistory=b("emojiHistory"),
                 storeUrl=s("storeUrl","").takeIf { it.startsWith("https://") }?.take(600).orEmpty(),
                 cloudEndpoint=app.lisan.keyboard.translation.CloudTranslator.endpoint(s("cloudEndpoint",""))?.toString().orEmpty()

@@ -196,13 +196,24 @@ class VoiceRouter(context:Context) {
     private var engine:VoiceEngine?=null
     fun start(mode:String,config:VoiceConfig,listener:(String,String)->Unit) {
         cancel()
-        val next=when {
-            mode=="bundled"->offline
-            mode=="local" && (offline.available(true) || !android.available(true))->offline
-            else->android
+        val offlineReady=offline.available(true)
+        val next:VoiceEngine
+        var cfg=config
+        when {
+            // Whisper model installed: use it (fully on-device).
+            mode!="system" && offlineReady -> next=offline
+            // Android 12+ on-device recognizer.
+            mode!="system" && android.available(true) -> next=android
+            // No offline engine (e.g. Android 11 without the Whisper model): fall back to the
+            // standard Android/Google recognizer instead of failing. It prefers offline packs when installed.
+            else -> {
+                next=android
+                cfg=config.copy(localOnly=false,preferOffline=mode!="system")
+                if(mode!="system") listener("fallback","")
+            }
         }
         engine=next
-        next.start(config) { state,value ->
+        next.start(cfg) { state,value ->
             if(engine===next) listener(state,value)
         }
     }
