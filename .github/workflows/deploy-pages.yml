@@ -1,1 +1,67 @@
+name: Deploy Web Studio to GitHub Pages
 
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'web-studio/**'
+      - 'Lisan_AI_Keyboard_Full_Source/web-studio/**'
+      - 'extracted_source/**/web-studio/**'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Locate web-studio
+        id: locate
+        run: |
+          if [ -d "web-studio" ]; then
+            echo "dir=web-studio" >> $GITHUB_OUTPUT
+          elif [ -d "Lisan_AI_Keyboard_Full_Source/web-studio" ]; then
+            echo "dir=Lisan_AI_Keyboard_Full_Source/web-studio" >> $GITHUB_OUTPUT
+          elif [ -d "extracted_source/Lisan_AI_Keyboard_Full_Source/web-studio" ]; then
+            echo "dir=extracted_source/Lisan_AI_Keyboard_Full_Source/web-studio" >> $GITHUB_OUTPUT
+          else
+            echo "web-studio not found"
+            find . -type d -name "web-studio" | head -5
+            exit 1
+          fi
+
+      - name: Install & Build
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: |
+          npm install
+          npm run build || npx vite build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.locate.outputs.dir }}/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
