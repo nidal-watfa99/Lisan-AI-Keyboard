@@ -1,0 +1,37 @@
+Lisan AI Keyboard — Proprietary License
+
+Copyright (c) 2026 Nidal Watfa. All rights reserved.
+
+This software, including its source code, design, user interface,
+graphics, documentation and compiled application packages (APK),
+is the exclusive property of the copyright holder.
+
+Except for the third-party components listed below, NO permission is
+granted to any person to:
+  1. copy, reproduce, or clone this software, in whole or in part;
+  2. modify, adapt, translate, or create derivative works from it;
+  3. distribute, publish, sublicense, sell, rent, or upload it to any
+     app store or website;
+  4. reverse engineer, decompile, or disassemble the application,
+     except where such restriction is prohibited by applicable law;
+  5. use its name, logo, or branding ("Lisan", "لسان").
+
+Viewing this repository on GitHub does not grant any license.
+Installing an official build is permitted for personal use only.
+Any use not expressly permitted here requires prior written
+permission from the copyright holder.
+
+THIRD-PARTY COMPONENTS
+This restriction does not apply to third-party components included
+in this repository, which remain under their own licenses:
+  - whisper.cpp and ggml (app/src/main/cpp/vendor/whisper) — MIT License
+  - Cairo, Tajawal and Amiri fonts (app/src/main/assets/fonts) —
+    SIL Open Font License 1.1
+  - Google ML Kit and AndroidX libraries — their respective terms
+The original license files and notices of these components must be kept.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+Contact: nidalwatfa99@gmail.com
