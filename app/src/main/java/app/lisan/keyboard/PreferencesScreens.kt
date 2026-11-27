@@ -8,6 +8,13 @@ import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,6 +65,7 @@ import kotlin.math.roundToInt
         Help(w("Only a short list of known typos is replaced. Protected and vocalized Arabic words are untouched. Press Delete immediately to undo.",
             "يقتصر التصحيح على قائمة قصيرة من الأخطاء المعروفة. لا تُغيّر الكلمات العربية المشكّلة أو المحمية. اضغط الحذف فوراً للتراجع."))
     }
+    TashkeelSettings(p,w,edit)
     Tile {
         Sub(w("Rows & order","الصفوف والترتيب"))
         Toggle(w("Number row","صف الأرقام"),p.numbers){n->edit{it.copy(numbers=n)}}
@@ -74,6 +82,64 @@ import kotlin.math.roundToInt
         TextButton(onClick={edit{it.copy(rowOrder=listOf(0,1,2))}}){Text(w("Reset row order","استعادة ترتيب الصفوف"))}
     }
     PreviewBoard(p,w)
+}
+
+@Composable private fun TashkeelSettings(p:Prefs,w:W,edit:EditPrefs) {
+    val ctx=LocalContext.current
+    val scope=rememberCoroutineScope()
+    var sample by remember { mutableStateOf("ذهب الطالب الى المدرسة صباحا") }
+    var result by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    Tile {
+        Sub(w("Automatic Arabic diacritics (tashkeel)","التشكيل العربي التلقائي"))
+        Toggle(w("Diacritize each Arabic word after Space","تشكيل كل كلمة عربية بعد المسافة"),p.autoTashkeel){n->edit{it.copy(autoTashkeel=n)}}
+        Help(w("Runs fully on this phone (rawi model, about 98% of letters correct). Use the شَكِّل toolbar key to diacritize a selection or the whole paragraph; tap it again to undo.",
+            "يعمل بالكامل على الجوال (نموذج rawi، دقته حوالي 98% من الحروف). استخدم زر «شَكِّل» في شريط الأدوات لتشكيل النص المحدد أو الفقرة كاملة، واضغطه مرة أخرى للتراجع."))
+        if(!app.lisan.keyboard.tashkeel.Tashkeel.bundled(ctx)) Help(w("Model file missing from this build.","ملف النموذج غير موجود في هذا الإصدار."))
+        Field(sample,{sample=it.take(500)},w("Try it","جرّب هنا"),2)
+        Button(enabled=!busy,onClick={
+            busy=true
+            scope.launch {
+                result=withContext(Dispatchers.Default){
+                    runCatching { app.lisan.keyboard.tashkeel.Tashkeel.diacritize(ctx,sample) }
+                        .getOrElse { w("Error: ","خطأ: ")+(it.message ?: it.javaClass.simpleName) }
+                }
+                busy=false
+            }
+        }){Text(w("Diacritize","شكّل"))}
+        if(result.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(result,style=MaterialTheme.typography.headlineSmall)
+        }
+    }
+}
+
+private val swatches=listOf("#FFFFFF","#000000","#111B2B","#273650","#F4F7FF","#79E9CB","#8AEDCF","#C4B8FF","#FF6B6B","#FF9F43",
+    "#FECA57","#1DD1A1","#48DBFB","#2E86DE","#5F27CD","#FF9FF3","#EE5253","#10AC84","#576574","#C8D6E5","#3D2C8D","#F8C291")
+
+@Composable private fun ColorRow(title:String,current:String?,set:(String)->Unit) {
+    var hex by remember(current){ mutableStateOf(current.orEmpty()) }
+    val norm=hex.trim().let { if(it.startsWith("#")) it else "#$it" }.uppercase()
+    val valid=Regex("#[0-9A-F]{6}").matches(norm)
+    fun parse(c:String)=androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(c))
+    Column(Modifier.fillMaxWidth().padding(vertical=6.dp)) {
+        Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(26.dp).clip(CircleShape).background(if(current!=null) parse(current) else androidx.compose.ui.graphics.Color.Transparent)
+                .border(1.dp,MaterialTheme.colorScheme.outline,CircleShape))
+            Text(title,Modifier.weight(1f),style=MaterialTheme.typography.titleSmall)
+            Text(current ?: "—",style=MaterialTheme.typography.bodySmall)
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top=6.dp),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            swatches.forEach { c ->
+                Box(Modifier.size(34.dp).clip(CircleShape).background(parse(c))
+                    .border(if(c==current) 3.dp else 1.dp,if(c==current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,CircleShape)
+                    .clickable { hex=c; set(c) })
+            }
+        }
+        Row(verticalAlignment=Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)){ Field(hex,{hex=it.take(7)},"#RRGGBB") }
+            TextButton(onClick={set(norm)},enabled=valid){Text("✓")}
+        }
+    }
 }
 
 @Composable private fun ThemeLibrary(p:Prefs,w:W,edit:EditPrefs) {
@@ -132,21 +198,54 @@ import kotlin.math.roundToInt
     }
     Tile {
         Sub(w("Personal colors","ألوان شخصية"))
-        Help(w("Use #RRGGBB. Setting a color activates Personal Studio. Microphone and translation colors change their glyphs.",
-            "استخدم #RRGGBB. يفعّل اختيار اللون السمة الشخصية. يغيّر لونا الصوت والترجمة لون رمزيهما."))
-        val names=listOf(w("Background","الخلفية"),w("Letters","الحروف"),w("Numbers","الأرقام"),w("Symbols","الرموز"),
+        Help(w("Tap a color, or type a code like #FF6B6B and press ✓. Choosing a color switches to the Personal theme.",
+            "اضغط على لون، أو اكتب رمزاً مثل ‎#FF6B6B‎ واضغط ✓. اختيار أي لون يفعّل السمة الشخصية."))
+        val names=listOf(w("Background","الخلفية"),w("Keys","لون الأزرار"),w("Letters","الحروف"),w("Numbers","الأرقام"),w("Symbols","الرموز"),
             w("Special keys","المفاتيح الخاصة"),w("Microphone","الميكروفون"),w("Translation","الترجمة"))
         CustomColors.forEachIndexed { i,key ->
-            var color by remember(p.colors[key]){mutableStateOf(p.colors[key].orEmpty())}
-            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.weight(1f)){Field(color,{color=it.take(7)},names[i])}
-                TextButton(onClick={edit{it.copy(theme="custom",colors=it.colors+(key to color))}},enabled=Regex("#[0-9a-fA-F]{6}").matches(color)){Text(w("Set","تعيين"))}
-            }
+            ColorRow(names[i],p.colors[key]) { c -> edit{it.copy(theme="custom",colors=it.colors+(key to c))} }
         }
         TextButton(onClick={edit{it.copy(colors=emptyMap())}}){Text(w("Reset colors","استعادة الألوان"))}
     }
+    BackgroundImage(p,w,edit)
     ThemeLibrary(p,w,edit)
     PreviewBoard(p,w)
+}
+
+@Composable private fun BackgroundImage(p:Prefs,w:W,edit:EditPrefs) {
+    val ctx=LocalContext.current
+    val scope=rememberCoroutineScope()
+    var message by remember { mutableStateOf("") }
+    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri!=null) scope.launch {
+            val ok=withContext(Dispatchers.IO) { runCatching {
+                // Decode with downsampling so large photos don't exhaust memory, then save a JPEG copy.
+                val bounds=android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds=true }
+                ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it,null,bounds) }
+                var sample=1
+                while(bounds.outWidth/(sample*2)>=1080 && bounds.outHeight/(sample*2)>=600) sample*=2
+                val bmp=ctx.contentResolver.openInputStream(uri)?.use {
+                    android.graphics.BitmapFactory.decodeStream(it,null,android.graphics.BitmapFactory.Options().apply { inSampleSize=sample })
+                } ?: error("Not an image")
+                app.lisan.keyboard.keyboard.BoardStyle.backgroundFile(ctx).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG,88,it) }
+                bmp.recycle()
+            }.isSuccess }
+            if(ok) { message=""; edit{it.copy(bgStamp=System.currentTimeMillis())} }
+            else message=w("Couldn't use this image.","تعذر استخدام هذه الصورة.")
+        }
+    }
+    Tile {
+        Sub(w("Keyboard background image","صورة خلفية للكيبورد"))
+        Button(onClick={picker.launch(arrayOf("image/*"))}){Text(if(p.bgStamp>0)w("Change image","تغيير الصورة") else w("Choose an image","اختيار صورة"))}
+        if(p.bgStamp>0) {
+            Knob(w("Darken image (%)","تعتيم الصورة (%)"),p.bgDim,0,85){n->edit{it.copy(bgDim=n)}}
+            TextButton(onClick={
+                app.lisan.keyboard.keyboard.BoardStyle.backgroundFile(ctx).delete()
+                edit{it.copy(bgStamp=0)}
+            }){Text(w("Remove image","إزالة الصورة"))}
+        }
+        if(message.isNotBlank()) Help(message)
+    }
 }
 
 @Composable internal fun Fonts(p:Prefs,w:W,edit:EditPrefs) {
@@ -156,6 +255,8 @@ import kotlin.math.roundToInt
     var reload by remember { mutableIntStateOf(0) }
     var q by remember { mutableStateOf("") }
     var arabicOnly by remember { mutableStateOf(true) }
+    var showDevice by remember { mutableStateOf(false) }
+    val ar=isArabic(p,ctx)
     var message by remember { mutableStateOf("") }
     LaunchedEffect(reload) {
         fonts=withContext(Dispatchers.IO) { runCatching { app.lisan.keyboard.keyboard.FontCatalog.all(ctx) }.getOrDefault(emptyList()) }
@@ -171,46 +272,74 @@ import kotlin.math.roundToInt
         w("Fonts change Lisan’s keys, not the font used by the app that receives your text.","تغيّر الخطوط مظهر مفاتيح لسان، وليس خط التطبيق الذي يستقبل النص."))
     PreviewBoard(p,w)
     Tile {
+        Sub(w("Writing style — works in every app","نمط الكتابة — يظهر في كل التطبيقات"))
+        Help(w("The letters you type are sent in this style, so it shows in WhatsApp, Instagram, etc. Choose Normal to type normally.",
+            "تُرسل الحروف التي تكتبها بهذا النمط، فيظهر في واتساب وإنستغرام وغيرها. اختر «عادي» للكتابة العادية."))
+        TextStyles.all.forEach { st ->
+            Row(Modifier.fillMaxWidth().clickable { edit{it.copy(textStyle=st.id)} },verticalAlignment=Alignment.CenterVertically) {
+                RadioButton(selected=p.textStyle==st.id,onClick={edit{it.copy(textStyle=st.id)}})
+                Column(Modifier.weight(1f)) {
+                    Help(if(ar) st.ar else st.en)
+                    Text(if(st.arabic) TextStyles.apply("لسان كيبورد جميل",st.id) else TextStyles.apply("Lisan Keyboard 2026",st.id),
+                        style=MaterialTheme.typography.titleMedium,maxLines=1)
+                }
+            }
+        }
+    }
+    Tile {
+        Sub(w("Key font — how the keyboard itself looks","خط أزرار اللوحة — شكل الكيبورد نفسه"))
         Knob(w("Letter size","حجم الحروف"),p.fontSize,12,28){n->edit{it.copy(fontSize=n)}}
         Button(onClick={picker.launch(arrayOf("font/ttf","font/otf","font/*","application/x-font-ttf","application/x-font-otf","application/octet-stream","*/*"))}){
             Text(w("Add a font from this phone (.ttf / .otf)","إضافة خط من الجوال (.ttf / .otf)"))
         }
         Help(w("Download any free font (for example from Google Fonts) to your phone, then add it here.","نزّل أي خط مجاني (مثلاً من Google Fonts) إلى جوالك ثم أضفه من هنا."))
         if(message.isNotBlank()) Help(message)
-        Field(q,{q=it.take(40)},w("Search fonts","بحث عن خط"))
-        Toggle(w("Show Arabic fonts only","إظهار الخطوط العربية فقط"),arabicOnly){arabicOnly=it}
     }
     val list=fonts
     if(list==null) Tile { Help(w("Loading fonts…","جارٍ تحميل الخطوط…")) }
     else {
-        val shown=list.filter { (!arabicOnly || it.arabic) && (q.isBlank() || it.label.contains(q,true)) }
+        val shown=list.filter { it.source!="device" || (showDevice && (!arabicOnly || it.arabic) && (q.isBlank() || it.label.contains(q,true))) }
         listOf("builtin" to w("Android styles","أنماط أندرويد"),"bundled" to w("Included with Lisan","مضمّنة مع لسان"),
-            "user" to w("Added by you","أضفتها أنت"),"device" to w("Installed on this phone","مثبتة على هذا الجوال")).forEach { (source,title) ->
+            "user" to w("Added by you","أضفتها أنت")).forEach { (source,title) ->
             val items=shown.filter { it.source==source }
             if(items.isNotEmpty()) Tile {
                 Sub("$title · ${items.size}")
-                items.forEach { f ->
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                        RadioButton(selected=p.font==f.id,onClick={edit{it.copy(font=f.id)}})
-                        Column(Modifier.weight(1f)) {
-                            Help(f.label)
-                            androidx.compose.ui.viewinterop.AndroidView(
-                                factory={android.widget.TextView(it).apply {setTextColor(0xffdcdef7.toInt()); textSize=21f; maxLines=1 }},
-                                update={ tv -> tv.text=if(f.arabic)"أبجد هوز · لسان 123" else "Lisan Keyboard 123"
-                                    tv.typeface=app.lisan.keyboard.keyboard.FontCatalog.typeface(ctx,f.id) }
-                            )
-                        }
-                        if(f.source=="user") TextButton(onClick={
-                            app.lisan.keyboard.keyboard.FontCatalog.remove(ctx,f.id)
-                            if(p.font==f.id) edit{it.copy(font="system")}
-                            reload++
-                        }){Text(w("Remove","حذف"))}
-                    }
-                }
+                items.forEach { f -> FontRow(f,p,w,edit) { reload++ } }
+            }
+        }
+        val deviceCount=list.count { it.source=="device" }
+        if(deviceCount>0) Tile {
+            TextButton(onClick={showDevice=!showDevice}){
+                Text(if(showDevice) w("Hide fonts installed on this phone","إخفاء خطوط الجوال") else w("More: fonts installed on this phone ($deviceCount)","المزيد: خطوط مثبتة على الجوال ($deviceCount)"))
+            }
+            if(showDevice) {
+                Field(q,{q=it.take(40)},w("Search fonts","بحث عن خط"))
+                Toggle(w("Show Arabic fonts only","إظهار الخطوط العربية فقط"),arabicOnly){arabicOnly=it}
+                shown.filter { it.source=="device" }.forEach { f -> FontRow(f,p,w,edit) { reload++ } }
             }
         }
         Tile { Help(w("Cairo, Tajawal and Amiri are bundled with their licenses. Any .ttf file added to app/src/main/assets/fonts in the source also appears here automatically.",
             "خطوط القاهرة وتجوال وأميري مضمّنة مع تراخيصها. أي ملف .ttf يُضاف إلى المجلد app/src/main/assets/fonts في المستودع يظهر هنا تلقائياً.")) }
+    }
+}
+
+@Composable private fun FontRow(f:app.lisan.keyboard.keyboard.FontEntry,p:Prefs,w:W,edit:EditPrefs,changed:()->Unit) {
+    val ctx=LocalContext.current
+    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+        RadioButton(selected=p.font==f.id,onClick={edit{it.copy(font=f.id)}})
+        Column(Modifier.weight(1f)) {
+            Help(f.label)
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory={android.widget.TextView(it).apply {setTextColor(0xffdcdef7.toInt()); textSize=21f; maxLines=1 }},
+                update={ tv -> tv.text=if(f.arabic)"أبجد هوز · لسان 123" else "Lisan Keyboard 123"
+                    tv.typeface=app.lisan.keyboard.keyboard.FontCatalog.typeface(ctx,f.id) }
+            )
+        }
+        if(f.source=="user") TextButton(onClick={
+            app.lisan.keyboard.keyboard.FontCatalog.remove(ctx,f.id)
+            if(p.font==f.id) edit{it.copy(font="system")}
+            changed()
+        }){Text(w("Remove","حذف"))}
     }
 }
 

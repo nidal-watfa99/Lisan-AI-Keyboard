@@ -33,13 +33,46 @@ object BoardStyle {
         else -> Palette(c("111B2B"),c("1D2840"),c("273650"),c("F4F7FF"),c("ACBBDC"),c("334462"),c("79E9CB"),c("112D2D"))
     }
     fun type(ctx: Context, font: String): Typeface = FontCatalog.typeface(ctx,font)
+    fun backgroundFile(ctx: Context) = java.io.File(ctx.filesDir,"keyboard_background.jpg")
+    private var bgCache: Pair<Long,android.graphics.Bitmap>? = null
+    fun backgroundBitmap(ctx: Context, stamp: Long): android.graphics.Bitmap? {
+        if (stamp <= 0) return null
+        bgCache?.let { if (it.first == stamp) return it.second }
+        val f = backgroundFile(ctx)
+        if (!f.exists()) return null
+        val bmp = runCatching { android.graphics.BitmapFactory.decodeFile(f.path) }.getOrNull() ?: return null
+        bgCache = stamp to bmp
+        return bmp
+    }
 }
+
+/** Draws a bitmap scaled to cover the bounds (center-crop) with a dark overlay for key legibility. */
+class CoverDrawable(private val bmp: android.graphics.Bitmap, private val dim: Int) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+    private val matrix = android.graphics.Matrix()
+    override fun draw(canvas: android.graphics.Canvas) {
+        val b = bounds
+        if (b.width() == 0 || b.height() == 0) return
+        val scale = maxOf(b.width().toFloat() / bmp.width, b.height().toFloat() / bmp.height)
+        matrix.reset(); matrix.setScale(scale, scale)
+        matrix.postTranslate(b.left + (b.width() - bmp.width * scale) / 2f, b.top + (b.height() - bmp.height * scale) / 2f)
+        canvas.save(); canvas.clipRect(b)
+        canvas.drawBitmap(bmp, matrix, paint)
+        canvas.drawColor((dim * 255 / 100).coerceIn(0,255) shl 24)
+        canvas.restore()
+    }
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.OPAQUE
+}
+
 
 fun toolName(id: String, ar: Boolean): String {
     val pair = when(id) {
         "translate" -> "Translate" to "ترجمة"; "mic" -> "Microphone" to "الميكروفون"
         "clipboard" -> "Clipboard" to "الحافظة"; "emoji" -> "Emoji" to "الإيموجي"
-        "cursor" -> "Editing tools" to "أدوات التحرير"
+        "cursor" -> "Editing tools" to "أدوات التحرير"; "tashkeel" -> "Auto diacritics" to "تشكيل تلقائي"
         "language" -> "Change language" to "تغيير اللغة"; "settings" -> "Settings" to "الإعدادات"
         else -> id to id
     }
@@ -105,13 +138,14 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
         if (p.border > 0) it.setStroke(dp(p.border), palette.muted and 0x66ffffff)
     }
     fun key(label: String, action: () -> Unit, labelForAccess: String = label,
-            fill: Int = palette.key, foreground: Int = color("text",palette.fg),
+            fill: Int = color("key",palette.key), foreground: Int = color("text",palette.fg),
             size: Int = p.fontSize): TextView = TextView(context).apply {
         text = label; textSize = size.toFloat(); gravity = Gravity.CENTER
         setTextColor(foreground); typeface = BoardStyle.type(context,p.font)
         includeFontPadding = false; maxLines = 1; textDirection = View.TEXT_DIRECTION_FIRST_STRONG
         contentDescription = labelForAccess
-        background = RippleDrawable(ColorStateList.valueOf(0x407dbba9),shape(fill), null)
+        val keyFill = if (p.bgStamp > 0) (fill and 0xffffff) or (0xA0 shl 24) else fill
+        background = RippleDrawable(ColorStateList.valueOf(0x407dbba9),shape(keyFill), null)
         if (p.shadow) elevation = dp(2).toFloat()
         setOnClickListener {
             if (p.haptics) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -188,7 +222,9 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
             event("text",text)
             if (shifted && !locked && mode == "letter") { shifted = false; render() }
         }
-        val display = rendered
+        val styleDef = app.lisan.keyboard.core.TextStyles.all.firstOrNull { it.id == p.textStyle }
+        val display = if (mode == "letter" && styleDef != null && !styleDef.arabic && !privateField)
+            app.lisan.keyboard.core.TextStyles.apply(rendered, p.textStyle) else rendered
         val key = key(display,{send(rendered)}, foreground = color(
             if (mode == "number") "numbers" else if (mode == "letter") "text" else "symbols",palette.fg),
             size = if (mode == "letter") p.fontSize else p.symbolSize)
@@ -217,11 +253,12 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
         val opacity = ((if (p.theme == "glass" && p.alpha == 100) 85 else p.alpha) * 255 / 100) shl 24
         background = GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(
             (first and 0xffffff) or opacity, ((if (p.theme == "custom") first else palette.end) and 0xffffff) or opacity))
+        BoardStyle.backgroundBitmap(context,p.bgStamp)?.let { background = CoverDrawable(it,p.bgDim) }
         setPadding(0,dp(3),0,dp(4))
         val layout = KeyboardCore.layouts.firstOrNull { it.tag == lang } ?: KeyboardCore.layouts.first()
         if (p.toolbar && !privateField && !numericField) {
             val labels = mapOf("translate" to "A↔ع", "mic" to "◉", "clipboard" to "▤", "emoji" to "☺",
-                "cursor" to "↔", "language" to "◎", "settings" to "⚙")
+                "cursor" to "↔", "language" to "◎", "settings" to "⚙", "tashkeel" to "شَكِّل")
             val tools = p.tools.filter { p.clipboard || it != "clipboard" }.filter { it in labels }
             if (tools.isNotEmpty()) addRow(row().apply {
                 tools.forEach { id -> put(key(labels.getValue(id),{ event(id,"") },toolName(id,ar), fill=when(id) { "translate","mic" -> palette.accent; else -> color("special",palette.special) },

@@ -25,6 +25,7 @@ import app.lisan.keyboard.MainActivity
 import app.lisan.keyboard.core.*
 import app.lisan.keyboard.emoji.Emoji
 import app.lisan.keyboard.privacy.Vault
+import app.lisan.keyboard.tashkeel.Tashkeel
 import app.lisan.keyboard.translation.*
 import app.lisan.keyboard.voice.*
 import kotlinx.coroutines.*
@@ -70,6 +71,8 @@ class LisanIme : InputMethodService() {
     private var sourceOverride: String? = null
     private var emojiGroup = ""
     private var variants = emptyList<String>()
+    private var tashkeelUndo: Pair<String,String>? = null  // diacritized text to original text
+    private var tashkeelJob: Job? = null
     private val ar get() = isArabic(prefs,this)
     private fun t(en: String,a: String) = if (ar) a else en
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
@@ -78,6 +81,10 @@ class LisanIme : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         scope.launch(Dispatchers.IO) { Emoji.load(this@LisanIme) }
+        scope.launch(Dispatchers.Default) {
+            delay(1500)
+            if (prefs.autoTashkeel) runCatching { Tashkeel.diacritize(this@LisanIme, "مرحبا بك") } // warm up the model
+        }
         scope.launch {
             settings.flow.collect {
                 prefs = it
@@ -136,7 +143,7 @@ class LisanIme : InputMethodService() {
         updateSuggestions(false)
     }
     private fun invalidateSession() {
-        active = false; field++; undo = null; personal = emptyList(); ignored = emptyList()
+        active = false; field++; undo = null; tashkeelUndo = null; personal = emptyList(); ignored = emptyList()
         stopVoice(true); closePanel(); board?.suggestions(emptyList())
     }
     private fun refreshBoard() {
@@ -217,15 +224,20 @@ class LisanIme : InputMethodService() {
         if (action in Tools && !safe && action != "language") return
         if (action != "mic" && voiceLive) stopVoice(true)
         when(action) {
-            "text" -> { insert(value); updateSuggestions() }
+            "text" -> {
+                val styled = if (prefs.textStyle == "normal" || sensitive) value
+                    else TextStyles.apply(value, prefs.textStyle, before(1).lastOrNull())
+                insert(styled); updateSuggestions()
+            }
             "delete","deleteWord" -> if (ic != null) { delete(action == "deleteWord",ic); updateSuggestions() }
             "space" -> if (ic != null) {
-                val canCorrect=(language=="en" && prefs.correction)||(language=="ar" && prefs.arabicCorrection)
+                val canCorrect=prefs.textStyle=="normal" && ((language=="en" && prefs.correction)||(language=="ar" && prefs.arabicCorrection))
                 val word = if (safe && canCorrect && selStart == selEnd) KeyboardCore.tail(before(90)) else ""
                 val fixed = Prediction.correction(word,language,personal + ignored,prefs.arabicCorrection)
                 undo = if (fixed != null) word to fixed else null
                 if (fixed == null) insert(" ") else edit("$fixed ",word.length,ic)
                 updateSuggestions()
+                if (prefs.autoTashkeel && prefs.textStyle == "normal" && language == "ar" && safe) autoTashkeel()
             }
             "suggestion" -> if (safe && ic != null) { edit("$value ",KeyboardCore.tail(before(90)).length,ic); updateSuggestions() }
             "enter" -> if (ic != null) {
@@ -247,6 +259,57 @@ class LisanIme : InputMethodService() {
             "clipboard" -> if (prefs.clipboard) { query=""; clipPanel() }
             "translate" -> { closePanel();translatePanel() }
             "mic" -> toggleVoice(false)
+            "tashkeel" -> tashkeelField()
+        }
+    }
+    /** Diacritizes the word just finished (using the sentence before it as context). */
+    private fun autoTashkeel() {
+        val token = field
+        val context = before(300)
+        if (!context.endsWith(" ")) return
+        val body = context.dropLast(1)
+        val word = KeyboardCore.tail(body)
+        if (word.isEmpty() || !Tashkeel.hasArabic(word) || Tashkeel.hasHarakat(word)) return
+        tashkeelJob = scope.launch {
+            val out = withContext(Dispatchers.Default) { runCatching { Tashkeel.diacritize(this@LisanIme, body) }.getOrNull() }
+                ?: return@launch
+            if (token != field || !safe) return@launch
+            val newWord = KeyboardCore.tail(out)
+            if (newWord.isEmpty() || newWord == word) return@launch
+            val ic = currentInputConnection ?: return@launch
+            // Only replace if the user hasn't typed anything since the space.
+            if (before(word.length + 1) != "$word ") return@launch
+            edit("$newWord ", word.length + 1, ic)
+        }
+    }
+    /** Toolbar button: diacritize the selection or the current paragraph; tap again to undo. */
+    private fun tashkeelField() {
+        if (!safe) return
+        val ic = currentInputConnection ?: return
+        val token = field
+        val undo = tashkeelUndo
+        val selection = selected()
+        if (selection.isEmpty() && undo != null && before(undo.first.length) == undo.first) {
+            edit(undo.second, undo.first.length, ic); tashkeelUndo = null
+            status(t("Diacritics removed.","أُزيل التشكيل."), true); return
+        }
+        val source = selection.ifEmpty { before(1500).substringAfterLast('\n') }
+        if (!Tashkeel.hasArabic(source)) { status(t("No Arabic text to diacritize.","لا يوجد نص عربي لتشكيله."), true); return }
+        status(t("Diacritizing…","جارٍ التشكيل…"))
+        scope.launch {
+            val out = withContext(Dispatchers.Default) { runCatching { Tashkeel.diacritize(this@LisanIme, source) }.getOrNull() }
+            if (token != field || !safe) return@launch
+            if (out == null) {
+                status(t("Diacritization failed: ","تعذر التشكيل: ") + Tashkeel.lastError, true); return@launch
+            }
+            val c = currentInputConnection ?: return@launch
+            if (selection.isNotEmpty()) { c.commitText(out,1); tashkeelUndo = null }
+            else {
+                if (before(source.length) != source) { status(""); return@launch }
+                edit(out, source.length, c)
+                tashkeelUndo = out to source
+            }
+            status(t("Diacritized. Tap again to undo.","تم التشكيل. اضغط مرة أخرى للتراجع."), true)
         }
     }
     private fun openApp(route: String) {
@@ -428,10 +491,12 @@ class LisanIme : InputMethodService() {
         if (variants.isNotEmpty()) {
             line(p,variants.map { e -> e to { insertEmoji(e) } }); variants=emptyList(); return
         }
-        if (query.isEmpty()) (listOf("★" , "◷") + Emoji.groups.keys).chunked(4).forEach { group ->
+        if (query.isEmpty()) (listOf("★" , "◷", "ツ / وجوه نصية") + Emoji.groups.keys).chunked(4).forEach { group ->
             line(p,group.map { g -> (if(ar) g.substringAfter(" / ") else g.substringBefore(" / ")) to { emojiGroup=g; emojiPanel() } })
         }
-        if (emojiGroup in listOf("★","◷") && query.isBlank()) {
+        if (emojiGroup == "ツ / وجوه نصية" && query.isBlank()) {
+            Kaomoji.list.chunked(3).forEach { row -> line(p,row.map { k -> k to { insert(k) } }) }
+        } else if (emojiGroup in listOf("★","◷") && query.isBlank()) {
             panelJob?.cancel()
             panelJob=scope.launch {
                 val found=withContext(Dispatchers.IO){ vault.items(if(emojiGroup=="★") "emojiFav" else "emojiRecent") }
