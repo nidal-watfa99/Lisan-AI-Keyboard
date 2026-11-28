@@ -42,32 +42,8 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2'
     implementation 'com.google.mlkit:translate:17.0.3'
     implementation 'com.google.mlkit:language-id:17.0.6'
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.23.2'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20250107'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
-}
-
-// Arabic diacritization model (rawi-ensemble, Apache-2.0, TigreGotico) fetched at build time
-// so it does not need to live in the repository. The app runs it fully offline.
-def tashkeelDir = file("src/main/assets/tashkeel")
-tasks.register('downloadTashkeelModel') {
-    doLast {
-        tashkeelDir.mkdirs()
-        ['rawi_ensemble.int8.onnx', 'vocab.json'].each { name ->
-            def target = new File(tashkeelDir, name)
-            if (!target.exists() || target.length() == 0) {
-                def url = new URL("https://huggingface.co/TigreGotico/rawi-ensemble/resolve/main/${name}")
-                def tmp = new File(tashkeelDir, name + '.part')
-                url.openStream().withCloseable { input -> tmp.withOutputStream { it << input } }
-                if (tmp.length() == 0) throw new GradleException("Empty download: ${name}")
-                tmp.renameTo(target)
-                println "Downloaded ${name} (${target.length()} bytes)"
-            }
-        }
-    }
-}
-tasks.configureEach { t ->
-    if (t.name == 'preBuild') t.dependsOn('downloadTashkeelModel')
 }

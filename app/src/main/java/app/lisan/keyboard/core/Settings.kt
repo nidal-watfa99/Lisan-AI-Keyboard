@@ -14,14 +14,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private val Context.lisanData by preferencesDataStore("lisan_settings")
-val Tools = listOf("translate", "mic", "tashkeel", "clipboard", "emoji", "cursor", "language", "settings")
+val Tools = listOf("translate", "mic", "clipboard", "emoji", "cursor", "language", "settings")
 val CustomColors = listOf("bg", "key", "text", "numbers", "symbols", "special", "mic", "translate")
 
 data class Prefs(
     val ui: String = "device", val languages: List<String> = listOf("ar", "en"), val defaultLang: String = "ar",
     val theme: String = "dark", val font: String = "system", val fontSize: Int = 19, val symbolSize: Int = 15,
     val height: Int = 48, val width: Int = 100, val gap: Int = 2, val radius: Int = 12, val border: Int = 0,
-    val alpha: Int = 100, val toolbarSize: Int = 38, val shadow: Boolean = false, val keyPreview: Boolean = true, val autoTashkeel: Boolean = true, val textStyle: String = "normal",
+    val alpha: Int = 100, val toolbarSize: Int = 38, val shadow: Boolean = false, val keyPreview: Boolean = true, val textStyle: String = "normal",
     val bgStamp: Long = 0, val bgDim: Int = 35,
     val savedThemes: Map<String,String> = emptyMap(),
     val rowHeights: List<Int> = listOf(0,0,0), val rowOrder: List<Int> = listOf(0,1,2),
@@ -39,7 +39,7 @@ data class Prefs(
         put("ui",ui); put("languages",JSONArray(languages)); put("defaultLang",defaultLang); put("theme",theme)
         put("font",font); put("fontSize",fontSize); put("symbolSize",symbolSize); put("height",height)
         put("width",width); put("gap",gap); put("radius",radius); put("border",border); put("alpha",alpha)
-        put("toolbarSize",toolbarSize); put("shadow",shadow); put("keyPreview",keyPreview); put("autoTashkeel",autoTashkeel); put("textStyle",textStyle); put("bgStamp",bgStamp); put("bgDim",bgDim); put("toolsV2",true); put("rowHeights",JSONArray(rowHeights))
+        put("toolbarSize",toolbarSize); put("shadow",shadow); put("keyPreview",keyPreview); put("textStyle",textStyle); put("bgStamp",bgStamp); put("bgDim",bgDim); put("rowHeights",JSONArray(rowHeights))
         put("rowOrder",JSONArray(rowOrder)); put("colors",JSONObject(colors)); put("savedThemes",JSONObject(savedThemes))
         put("numbers",numbers); put("suggestions",suggestions); put("toolbar",toolbar); put("marks",marks)
         put("eastern",eastern); put("haptics",haptics); put("autoCaps",autoCaps); put("correction",correction);put("arabicCorrection",arabicCorrection)
@@ -87,12 +87,11 @@ data class Prefs(
                 fontSize=i("fontSize",19,12..28), symbolSize=i("symbolSize",15,10..23), height=i("height",48,38..60),
                 width=i("width",100,80..100), gap=i("gap",2,0..4), radius=i("radius",12,0..24),
                 border=i("border",0,0..3), alpha=i("alpha",100,50..100), toolbarSize=i("toolbarSize",38,32..50),
-                shadow=b("shadow"), keyPreview=b("keyPreview",true), autoTashkeel=b("autoTashkeel",true), textStyle=s("textStyle","normal").takeIf { it in TextStyles.ids } ?: "normal",
+                shadow=b("shadow"), keyPreview=b("keyPreview",true), textStyle=s("textStyle","normal").takeIf { it in TextStyles.ids } ?: "normal",
                 bgStamp=j.optLong("bgStamp",0L).coerceAtLeast(0L), bgDim=i("bgDim",35,0..85), rowHeights=heights, rowOrder=order, colors=colors, savedThemes=savedThemes,
                 numbers=b("numbers",true), suggestions=b("suggestions",true), toolbar=b("toolbar",true),
                 marks=b("marks"), eastern=b("eastern"), haptics=b("haptics"), autoCaps=b("autoCaps",true),
-                correction=b("correction"), arabicCorrection=b("arabicCorrection"), tools=list("tools",Tools).filter { it in Tools }.distinct().let { t ->
-                    if (j.has("toolsV2") || "tashkeel" in t) t else t.toMutableList().apply { add((indexOf("mic")+1).coerceIn(0,size),"tashkeel") } },
+                correction=b("correction"), arabicCorrection=b("arabicCorrection"), tools=list("tools",Tools).filter { it in Tools }.distinct(),
                 voiceLang=s("voiceLang","keyboard").takeIf { it == "keyboard" || Regex("[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,3}").matches(it) } ?: "keyboard",
                 voiceMode=s("voiceMode","local").takeIf { it in listOf("local","bundled","system") } ?: "local",
                 voiceAuto=b("voiceAuto"), voiceRepeat=b("voiceRepeat"),

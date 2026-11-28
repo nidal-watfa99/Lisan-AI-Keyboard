@@ -27,11 +27,8 @@ To inspect resolved transitive dependencies using the same artifact repositories
 ./gradlew :app:dependencies --configuration debugRuntimeClasspath
 ```
 
-## Arabic diacritization (tashkeel)
-
-- **rawi-ensemble** model by TigreGotico (https://huggingface.co/TigreGotico/rawi-ensemble), Apache License 2.0. Downloaded at build time into `app/src/main/assets/tashkeel/` and run on the device.
-- **ONNX Runtime for Android** by Microsoft (`com.microsoft.onnxruntime:onnxruntime-android`), MIT License.
-
 ## Emoji data
 
 - `app/src/main/assets/emoji.txt` is generated from the Unicode `emoji-test.txt` (Emoji 18.0), © Unicode, Inc., Unicode License v3.
+- `app/src/main/assets/symbols.txt` lists the Unicode symbol blocks (arrows, mathematics, currency, shapes, Braille, ...) and was generated from the Unicode Character Database, © Unicode, Inc., Unicode License v3. Symbols a device font cannot draw are hidden in the panel.
+

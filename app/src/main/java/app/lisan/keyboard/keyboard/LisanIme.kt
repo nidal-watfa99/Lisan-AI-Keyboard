@@ -24,8 +24,8 @@ import android.widget.TextView
 import app.lisan.keyboard.MainActivity
 import app.lisan.keyboard.core.*
 import app.lisan.keyboard.emoji.Emoji
+import app.lisan.keyboard.emoji.Symbols
 import app.lisan.keyboard.privacy.Vault
-import app.lisan.keyboard.tashkeel.Tashkeel
 import app.lisan.keyboard.translation.*
 import app.lisan.keyboard.voice.*
 import kotlinx.coroutines.*
@@ -71,8 +71,6 @@ class LisanIme : InputMethodService() {
     private var sourceOverride: String? = null
     private var emojiGroup = ""
     private var variants = emptyList<String>()
-    private var tashkeelUndo: Pair<String,String>? = null  // diacritized text to original text
-    private var tashkeelJob: Job? = null
     private val ar get() = isArabic(prefs,this)
     private fun t(en: String,a: String) = if (ar) a else en
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
@@ -81,10 +79,6 @@ class LisanIme : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         scope.launch(Dispatchers.IO) { Emoji.load(this@LisanIme) }
-        scope.launch(Dispatchers.Default) {
-            delay(1500)
-            if (prefs.autoTashkeel) runCatching { Tashkeel.diacritize(this@LisanIme, "مرحبا بك") } // warm up the model
-        }
         scope.launch {
             settings.flow.collect {
                 prefs = it
@@ -143,7 +137,7 @@ class LisanIme : InputMethodService() {
         updateSuggestions(false)
     }
     private fun invalidateSession() {
-        active = false; field++; undo = null; tashkeelUndo = null; personal = emptyList(); ignored = emptyList()
+        active = false; field++; undo = null; personal = emptyList(); ignored = emptyList()
         stopVoice(true); closePanel(); board?.suggestions(emptyList())
     }
     private fun refreshBoard() {
@@ -237,7 +231,6 @@ class LisanIme : InputMethodService() {
                 undo = if (fixed != null) word to fixed else null
                 if (fixed == null) insert(" ") else edit("$fixed ",word.length,ic)
                 updateSuggestions()
-                if (prefs.autoTashkeel && prefs.textStyle == "normal" && language == "ar" && safe) autoTashkeel()
             }
             "suggestion" -> if (safe && ic != null) { edit("$value ",KeyboardCore.tail(before(90)).length,ic); updateSuggestions() }
             "enter" -> if (ic != null) {
@@ -259,57 +252,6 @@ class LisanIme : InputMethodService() {
             "clipboard" -> if (prefs.clipboard) { query=""; clipPanel() }
             "translate" -> { closePanel();translatePanel() }
             "mic" -> toggleVoice(false)
-            "tashkeel" -> tashkeelField()
-        }
-    }
-    /** Diacritizes the word just finished (using the sentence before it as context). */
-    private fun autoTashkeel() {
-        val token = field
-        val context = before(300)
-        if (!context.endsWith(" ")) return
-        val body = context.dropLast(1)
-        val word = KeyboardCore.tail(body)
-        if (word.isEmpty() || !Tashkeel.hasArabic(word) || Tashkeel.hasHarakat(word)) return
-        tashkeelJob = scope.launch {
-            val out = withContext(Dispatchers.Default) { runCatching { Tashkeel.diacritize(this@LisanIme, body) }.getOrNull() }
-                ?: return@launch
-            if (token != field || !safe) return@launch
-            val newWord = KeyboardCore.tail(out)
-            if (newWord.isEmpty() || newWord == word) return@launch
-            val ic = currentInputConnection ?: return@launch
-            // Only replace if the user hasn't typed anything since the space.
-            if (before(word.length + 1) != "$word ") return@launch
-            edit("$newWord ", word.length + 1, ic)
-        }
-    }
-    /** Toolbar button: diacritize the selection or the current paragraph; tap again to undo. */
-    private fun tashkeelField() {
-        if (!safe) return
-        val ic = currentInputConnection ?: return
-        val token = field
-        val undo = tashkeelUndo
-        val selection = selected()
-        if (selection.isEmpty() && undo != null && before(undo.first.length) == undo.first) {
-            edit(undo.second, undo.first.length, ic); tashkeelUndo = null
-            status(t("Diacritics removed.","أُزيل التشكيل."), true); return
-        }
-        val source = selection.ifEmpty { before(1500).substringAfterLast('\n') }
-        if (!Tashkeel.hasArabic(source)) { status(t("No Arabic text to diacritize.","لا يوجد نص عربي لتشكيله."), true); return }
-        status(t("Diacritizing…","جارٍ التشكيل…"))
-        scope.launch {
-            val out = withContext(Dispatchers.Default) { runCatching { Tashkeel.diacritize(this@LisanIme, source) }.getOrNull() }
-            if (token != field || !safe) return@launch
-            if (out == null) {
-                status(t("Diacritization failed: ","تعذر التشكيل: ") + Tashkeel.lastError, true); return@launch
-            }
-            val c = currentInputConnection ?: return@launch
-            if (selection.isNotEmpty()) { c.commitText(out,1); tashkeelUndo = null }
-            else {
-                if (before(source.length) != source) { status(""); return@launch }
-                edit(out, source.length, c)
-                tashkeelUndo = out to source
-            }
-            status(t("Diacritized. Tap again to undo.","تم التشكيل. اضغط مرة أخرى للتراجع."), true)
         }
     }
     private fun openApp(route: String) {
@@ -491,10 +433,25 @@ class LisanIme : InputMethodService() {
         if (variants.isNotEmpty()) {
             line(p,variants.map { e -> e to { insertEmoji(e) } }); variants=emptyList(); return
         }
-        if (query.isEmpty()) (listOf("★" , "◷", "ツ / وجوه نصية") + Emoji.groups.keys).chunked(4).forEach { group ->
-            line(p,group.map { g -> (if(ar) g.substringAfter(" / ") else g.substringBefore(" / ")) to { emojiGroup=g; emojiPanel() } })
+        val symbolMode = Symbols.groups.containsKey(emojiGroup)
+        if (query.isEmpty() && symbolMode) {
+            val keys = Symbols.groups.keys.toList()
+            chipStrip(p,listOf("☺" to { emojiGroup=Emoji.groups.keys.firstOrNull() ?: "★"; emojiPanel() }) +
+                keys.map { g -> (if(ar) g.substringAfter(" / ") else g.substringBefore(" / ")) to { emojiGroup=g; emojiPanel() } },
+                keys.indexOf(emojiGroup) + 1)
+        } else if (query.isEmpty()) (listOf("★" , "◷", "ツ / وجوه نصية", "Ω / رموز كاملة") + Emoji.groups.keys).chunked(4).forEach { group ->
+            line(p,group.map { g -> (if(ar) g.substringAfter(" / ") else g.substringBefore(" / ")) to {
+                if (g == "Ω / رموز كاملة") {
+                    Symbols.load(this)
+                    val first = Symbols.groups.keys.firstOrNull()
+                    if (first == null) status(t("Symbols file missing from this build.","ملف الرموز غير موجود في هذا الإصدار."), true)
+                    else { emojiGroup=first; emojiPanel() }
+                } else { emojiGroup=g; emojiPanel() }
+            } })
         }
-        if (emojiGroup == "ツ / وجوه نصية" && query.isBlank()) {
+        if (symbolMode && query.isBlank()) {
+            drawSymbols(p,Symbols.groups[emojiGroup].orEmpty())
+        } else if (emojiGroup == "ツ / وجوه نصية" && query.isBlank()) {
             Kaomoji.list.chunked(3).forEach { row -> line(p,row.map { k -> k to { insert(k) } }) }
         } else if (emojiGroup in listOf("★","◷") && query.isBlank()) {
             panelJob?.cancel()
@@ -503,6 +460,41 @@ class LisanIme : InputMethodService() {
                 if (panelName=="emoji" && safe) drawEmoji(p,found.map { it.optString("text") })
             }
         } else drawEmoji(p,if(query.isBlank()) Emoji.groups[emojiGroup].orEmpty() else Emoji.search(query))
+    }
+    private fun drawSymbols(p: LinearLayout, items: List<String>) {
+        items.filter { Emoji.drawable(it) }.chunked(8).forEach { row ->
+            val grid=LinearLayout(this)
+            row.forEach { sym ->
+                grid.addView(TextView(this).apply {
+                    text=sym; textSize=22f; gravity=Gravity.CENTER; contentDescription=sym
+                    setOnClickListener { if (safe) insert(sym) }
+                },LinearLayout.LayoutParams(0,dp(40),1f))
+            }
+            repeat(8 - row.size) { grid.addView(View(this),LinearLayout.LayoutParams(0,dp(40),1f)) }
+            p.addView(grid)
+        }
+    }
+    /** One horizontally scrollable row of buttons, so a long list of groups does not fill the panel. */
+    private fun chipStrip(p: LinearLayout, actions: List<Pair<String,()->Unit>>, selected: Int) {
+        val row = LinearLayout(this).apply { layoutDirection = View.LAYOUT_DIRECTION_LTR }
+        var selectedView: View? = null
+        actions.forEachIndexed { i, (title, action) ->
+            val chip = TextView(this).apply {
+                text=title; textSize=14f; gravity=Gravity.CENTER; maxLines=1
+                setTextColor(0xffe6f4ff.toInt()); setPadding(dp(14),0,dp(14),0)
+                background = android.graphics.drawable.GradientDrawable().also { d ->
+                    d.setColor(if (i == selected) 0xff3f6a8f.toInt() else 0xff2b3c58.toInt()); d.cornerRadius=dp(9).toFloat()
+                }
+                setOnClickListener { if (safe) action() }
+            }
+            if (i == selected) selectedView = chip
+            row.addView(chip,LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,dp(42)).apply { setMargins(dp(2),dp(2),dp(2),dp(2)) })
+        }
+        val strip = android.widget.HorizontalScrollView(this).apply {
+            layoutDirection = View.LAYOUT_DIRECTION_LTR; isHorizontalScrollBarEnabled=false; addView(row)
+        }
+        p.addView(strip)
+        strip.post { strip.scrollTo(((selectedView?.left ?: 0) - dp(48)).coerceAtLeast(0),0) }
     }
     private fun drawEmoji(p: LinearLayout, items: List<String>, direct: Boolean = false) {
         items.filter { Emoji.drawable(it) }.chunked(8).forEach { row ->

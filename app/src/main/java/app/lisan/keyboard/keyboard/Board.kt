@@ -72,7 +72,7 @@ fun toolName(id: String, ar: Boolean): String {
     val pair = when(id) {
         "translate" -> "Translate" to "ترجمة"; "mic" -> "Microphone" to "الميكروفون"
         "clipboard" -> "Clipboard" to "الحافظة"; "emoji" -> "Emoji" to "الإيموجي"
-        "cursor" -> "Editing tools" to "أدوات التحرير"; "tashkeel" -> "Auto diacritics" to "تشكيل تلقائي"
+        "cursor" -> "Editing tools" to "أدوات التحرير"
         "language" -> "Change language" to "تغيير اللغة"; "settings" -> "Settings" to "الإعدادات"
         else -> id to id
     }
@@ -258,7 +258,7 @@ class Board @JvmOverloads constructor(context: Context, private val event: (Stri
         val layout = KeyboardCore.layouts.firstOrNull { it.tag == lang } ?: KeyboardCore.layouts.first()
         if (p.toolbar && !privateField && !numericField) {
             val labels = mapOf("translate" to "A↔ع", "mic" to "◉", "clipboard" to "▤", "emoji" to "☺",
-                "cursor" to "↔", "language" to "◎", "settings" to "⚙", "tashkeel" to "شَكِّل")
+                "cursor" to "↔", "language" to "◎", "settings" to "⚙")
             val tools = p.tools.filter { p.clipboard || it != "clipboard" }.filter { it in labels }
             if (tools.isNotEmpty()) addRow(row().apply {
                 tools.forEach { id -> put(key(labels.getValue(id),{ event(id,"") },toolName(id,ar), fill=when(id) { "translate","mic" -> palette.accent; else -> color("special",palette.special) },

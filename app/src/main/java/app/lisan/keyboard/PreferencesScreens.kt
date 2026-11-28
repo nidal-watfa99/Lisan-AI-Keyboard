@@ -65,7 +65,6 @@ import kotlin.math.roundToInt
         Help(w("Only a short list of known typos is replaced. Protected and vocalized Arabic words are untouched. Press Delete immediately to undo.",
             "يقتصر التصحيح على قائمة قصيرة من الأخطاء المعروفة. لا تُغيّر الكلمات العربية المشكّلة أو المحمية. اضغط الحذف فوراً للتراجع."))
     }
-    TashkeelSettings(p,w,edit)
     Tile {
         Sub(w("Rows & order","الصفوف والترتيب"))
         Toggle(w("Number row","صف الأرقام"),p.numbers){n->edit{it.copy(numbers=n)}}
@@ -82,35 +81,6 @@ import kotlin.math.roundToInt
         TextButton(onClick={edit{it.copy(rowOrder=listOf(0,1,2))}}){Text(w("Reset row order","استعادة ترتيب الصفوف"))}
     }
     PreviewBoard(p,w)
-}
-
-@Composable private fun TashkeelSettings(p:Prefs,w:W,edit:EditPrefs) {
-    val ctx=LocalContext.current
-    val scope=rememberCoroutineScope()
-    var sample by remember { mutableStateOf("ذهب الطالب الى المدرسة صباحا") }
-    var result by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    Tile {
-        Sub(w("Automatic Arabic diacritics (tashkeel)","التشكيل العربي التلقائي"))
-        Toggle(w("Diacritize each Arabic word after Space","تشكيل كل كلمة عربية بعد المسافة"),p.autoTashkeel){n->edit{it.copy(autoTashkeel=n)}}
-        Help(w("Runs fully on this phone (rawi model, about 98% of letters correct). Use the شَكِّل toolbar key to diacritize a selection or the whole paragraph; tap it again to undo.",
-            "يعمل بالكامل على الجوال (نموذج rawi، دقته حوالي 98% من الحروف). استخدم زر «شَكِّل» في شريط الأدوات لتشكيل النص المحدد أو الفقرة كاملة، واضغطه مرة أخرى للتراجع."))
-        if(!app.lisan.keyboard.tashkeel.Tashkeel.bundled(ctx)) Help(w("Model file missing from this build.","ملف النموذج غير موجود في هذا الإصدار."))
-        Field(sample,{sample=it.take(500)},w("Try it","جرّب هنا"),2)
-        Button(enabled=!busy,onClick={
-            busy=true
-            scope.launch {
-                result=withContext(Dispatchers.Default){
-                    runCatching { app.lisan.keyboard.tashkeel.Tashkeel.diacritize(ctx,sample) }
-                        .getOrElse { w("Error: ","خطأ: ")+(it.message ?: it.javaClass.simpleName) }
-                }
-                busy=false
-            }
-        }){Text(w("Diacritize","شكّل"))}
-        if(result.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer {
-            Text(result,style=MaterialTheme.typography.headlineSmall)
-        }
-    }
 }
 
 private val swatches=listOf("#FFFFFF","#000000","#111B2B","#273650","#F4F7FF","#79E9CB","#8AEDCF","#C4B8FF","#FF6B6B","#FF9F43",
